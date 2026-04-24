@@ -12,28 +12,37 @@ DATA_FILE = "history.json"
 def get_jobs(url, headers):
     try:
         res = requests.get(url, headers=headers, timeout=20)
-        if res.status_code != 200: return {}
+        if res.status_code != 200:
+            print(f"アクセス失敗: {res.status_code}")
+            return {}
         
         soup = BeautifulSoup(res.text, "html.parser")
-        job_blocks = soup.select("section.p-searchResult__item")
+        # 店舗カードを広く探す
+        job_blocks = soup.find_all("div", class_="p-searchResultList__item") or soup.find_all("section", class_="p-searchResult__item")
         
         page_data = {}
         for block in job_blocks:
-            title_tag = block.select_one("h2.p-searchResult__itemTitle a")
-            loc_tag = block.select_one(".p-searchResult__itemInfoText")
-            
-            if title_tag:
-                job_url = "https://job.inshokuten.com" + title_tag.get("href").split("?")[0]
-                job_title = title_tag.get_text(strip=True)
+            # 店名・タイトルの取得
+            title_tag = block.find("h2", class_="p-searchResult__itemTitle")
+            if title_tag and title_tag.find("a"):
+                a_tag = title_tag.find("a")
+                job_url = "https://job.inshokuten.com" + a_tag.get("href").split("?")[0]
+                job_title = a_tag.get_text(strip=True)
+                
+                # 所在地/最寄駅の取得
+                loc_tag = block.find("p", class_="p-searchResult__itemInfoText")
                 location = loc_tag.get_text(strip=True) if loc_tag else "場所不明"
+                
                 page_data[job_url] = f"{job_title} （{location}）"
+        
         return page_data
-    except:
+    except Exception as e:
+        print(f"エラー詳細: {e}")
         return {}
 
 def main():
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://job.inshokuten.com/"
     }
     
@@ -48,7 +57,7 @@ def main():
     for p in [1, 2]:
         print(f"スキャン中: {p}ページ目...")
         target_url = BASE_URL.format(page=p)
-        time.sleep(random.uniform(5, 8))
+        time.sleep(random.uniform(3, 6))
         jobs = get_jobs(target_url, headers)
         all_current_jobs.update(jobs)
 
