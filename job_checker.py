@@ -5,16 +5,18 @@ import os
 import time
 import random
 
-# 設定：東京23区・三鷹市／オープニング募集
-BASE_URL = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchRegionArea=tokyo-23ward&searchRegionArea=mitaka-city&page={page}"
-DATA_FILE = "history.json"
+# ターゲット：飲食店.COM 求人（東京23区・オープニングスタッフ・新着順）
+TARGET_URL = "https://job.inshokuten.com/kanto/work/?searchJobType=opening&searchArea=tokyo23"
+DATA_FILE = "job_history.json"
 
 def main():
-    # Googlebotになりすましてサイトのガードを突破する
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "ja,en-JP;q=0.9",
+        "Referer": "https://www.google.com/"
     }
     
+    # 履歴の読み込み
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -22,59 +24,53 @@ def main():
         except: history = {}
     else: history = {}
 
-    all_current_jobs = {}
-    
-    # 1ページ目と2ページ目をスキャン（最大40件）
-    for p in [1, 2]:
-        print(f"ターゲット確認中: {p}ページ目...")
-        try:
-            time.sleep(random.uniform(5, 8))
-            res = requests.get(BASE_URL.format(page=p), headers=headers, timeout=30)
-            
-            if res.status_code != 200:
-                print(f"ページ{p}の取得に失敗しました (Status: {res.status_code})")
-                continue
-                
+    current_jobs = {}
+    try:
+        print("飲食店求人の新着（オープニング）をスキャン中...")
+        time.sleep(random.uniform(5, 10))
+        res = requests.get(TARGET_URL, headers=headers, timeout=30)
+        
+        if res.status_code == 200:
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # 全てのリンクから求人詳細（/detail/）を探し、その中の店名を特定する
-            links = soup.find_all("a")
-            for a in links:
-                href = a.get("href", "")
-                if "/kanto/work/detail/" in href:
-                    # URLを正規化
-                    job_url = "https://job.inshokuten.com" + href.split("?")[0]
+            # 求人カードを抽出（サイトの構造に合わせて調整）
+            # 飲食店.COMの場合、各求人は article や div.jobItem に入っていることが多い
+            items = soup.select(".itemBox") or soup.select("article")
+            
+            for item in items:
+                link_tag = item.find("a", href=True)
+                if link_tag and "/kanto/work/detail/" in link_tag['href']:
+                    # URLを整形
+                    url = "https://job.inshokuten.com" + link_tag['href'].split("?")[0]
                     
-                    # aタグの中にh2（店名）があればそれを、なければaタグ自体のテキストを取得
-                    name_elem = a.find("h2") or a
-                    job_title = name_elem.get_text(strip=True)
+                    # 店名とキャッチコピーを取得
+                    title = item.select_one(".itemName") or item.select_one("h3")
+                    catch = item.select_one(".itemCatch") or item.select_one(".text")
                     
-                    # 「求人詳細へ」などの不要な文字を弾き、純粋な店名だけを保存
-                    if len(job_title) > 2 and job_title != "求人詳細へ":
-                        all_current_jobs[job_url] = job_title
+                    name_text = title.get_text(strip=True) if title else "店名不明"
+                    catch_text = catch.get_text(strip=True)[:50] if catch else ""
+                    
+                    current_jobs[url] = f"{name_text} | {catch_text}"
 
-        except Exception as e:
-            print(f"エラー発生: {e}")
+        print(f"--- 完了：合計{len(current_jobs)}件を検知 ---")
 
-    count = len(all_current_jobs)
-    print(f"--- 完了: 合計{count}件の有効な求人を検知 ---")
+        # 差分（新着）チェック
+        new_items = [u for u in current_jobs.keys() if u not in history]
+        if new_items:
+            print(f"★【新着求人】{len(new_items)} 件のオープニング募集が見つかりました！")
+            for u in new_items:
+                print(f"求人：{current_jobs[u]}")
+                print(f"URL: {u}")
+                print("-" * 30)
+        else:
+            print("新しい求人情報はありません。")
 
-    any_news = False
-    new_links = [link for link in all_current_jobs.keys() if link not in history]
-    
-    if new_links:
-        any_news = True
-        print("★【求人飲食店ドットコム】新着のオープニング案件を発見しました！")
-        for link in new_links:
-            print(f"  - {all_current_jobs[link]}")
-            print(f"    URL: {link}")
-    
-    # 1件でも取れていれば履歴を更新。0件ならブロックされた可能性があるので更新しない。
-    if count > 0:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_current_jobs, f, ensure_ascii=False, indent=2)
-    else:
-        print("【警告】店舗データが取得できませんでした。")
+    except Exception as e:
+        print(f"エラー発生: {e}")
+
+    # 履歴を保存
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(current_jobs if current_jobs else history, f, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
     main()
