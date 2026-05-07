@@ -1,29 +1,35 @@
-name: Inshokuten-Job-Monitor
+name: Tabelog-Job-Monitor
 
 on:
   schedule:
-    - cron: '45 * * * *' # 毎時45分に実行
-  workflow_dispatch:
+    - cron: '0 * * * *' # 1時間に1回自動実行
+  workflow_dispatch: # 手動実行ボタン
 
 jobs:
-  build:
+  run_job:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 履歴ファイルを書き戻すために必須
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
+
       - name: Install dependencies
         run: pip install requests beautifulsoup4
-      - name: Run Job Check
-        run: python job_checker.py
-      - name: Commit and Push
+
+      - name: Run Python Script
+        run: python job_checker.py # ここは実行したいファイル名に合わせてください
+
+      - name: Save updates
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add history.json
-          git commit -m "Update job history" || exit 0
+          git commit -m "Update job history" || echo "No changes to commit"
           git push
