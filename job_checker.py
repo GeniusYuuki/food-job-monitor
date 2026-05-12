@@ -3,23 +3,18 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import json
 import os
-import re # 正規表現モジュールを追加
+import re
 
-# 日本時間(JST)の取得
 JST = timezone(timedelta(hours=+9), 'JST')
 now = datetime.now(JST)
+m, d = str(now.month), str(now.day)
+m_zero, d_zero = now.strftime("%m"), now.strftime("%d")
 
-# 判定用の数字を用意（5月12日なら、5 と 12）
-m = str(now.month)
-d = str(now.day)
-m_zero = now.strftime("%m")
-d_zero = now.strftime("%d")
+# 正規表現パターン
+date_pattern = re.compile(f"({m}|{m_zero})[年/\. ]+({d}|{d_zero})")
 
-# 正規表現パターン：月と日の間に何らかの記号や文字が入っているケースをすべて探す
-# 例: 05/12, 5/12, 05月12日, 5月12日, 05.12 など
-date_pattern = re.compile(f"({m}|{m_zero})[埋年/\. ]+({d}|{d_zero})")
-
-url = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchKeyword_u=&district=kanto&desiredConditionArea=kanto&desiredConditionArea=kanto&searchRegionArea=tokyo-23ward"
+# ★URLの末尾に &sort=new を追加して、新着を強制的に上に持ってくる
+url = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchKeyword_u=&district=kanto&desiredConditionArea=kanto&desiredConditionArea=kanto&searchRegionArea=tokyo-23ward&sort=new"
 
 def main():
     old_data = []
@@ -55,21 +50,20 @@ def main():
     for item in items:
         text_content = item.get_text(separator=' ', strip=True)
         
-        # 正規表現で日付、または「本日」「時間前」が含まれるかチェック
+        # もし今日が見つからない場合、どんな日付が入っているかデバッグ表示
+        # (ログが爆発しないよう、最初の一件だけ出す)
+        if items.index(item) == 0:
+            found_dates = re.findall(r"\d{1,2}[年/\.]\d{1,2}", text_content)
+            print(f"先頭アイテム内の日付サンプル: {found_dates}")
+
         if date_pattern.search(text_content) or "本日" in text_content or "時間前" in text_content:
             title_tag = item.find(["h3", "h2", "strong", "p"], class_=lambda x: x and "title" in x)
-            if not title_tag:
-                title_tag = item.find(["h3", "h2"])
-            
+            if not title_tag: title_tag = item.find(["h3", "h2"])
             if not title_tag: continue
             
             title = title_tag.get_text(strip=True).replace("NEW", "").strip()
-            
-            # エリア情報の取得
-            area = "エリア不明"
             area_tag = item.find(class_=lambda x: x and ("address" in x or "map" in x))
-            if area_tag:
-                area = area_tag.get_text(strip=True)
+            area = area_tag.get_text(strip=True) if area_tag else "エリア不明"
 
             job_info = {"title": title, "area": area}
             current_today_items.append(job_info)
@@ -77,13 +71,11 @@ def main():
             if title not in old_titles:
                 new_arrivals.append(job_info)
 
-    # 結果の出力
     if new_arrivals:
         print(f"\n★新着あり！★ (判定対象: {m}/{d})")
         print("=" * 40)
         for job in new_arrivals:
-            print(f"店名: {job['title']}")
-            print(f"エリア: {job['area']}")
+            print(f"店名: {job['title']} / エリア: {job['area']}")
             print("-" * 40)
     else:
         print(f"\n本日（{m}月{d}日）の更新分は見つかりませんでした。")
