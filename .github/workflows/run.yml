@@ -2,28 +2,37 @@ name: Update job history
 
 on:
   schedule:
-    # 3時間おき（日本時間で 0:00, 3:00, 6:00...）に実行する設定
+    # 3時間おきに実行
     - cron: '0 */3 * * *'
-  workflow_dispatch: # 手動で実行ボタンを押せるようにする設定（デバッグに便利です）
+  workflow_dispatch: # 手動実行用ボタン
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # GitHubに書き込むための権限を明示的に許可
+    permissions:
+      contents: write
+      
     steps:
       - uses: actions/checkout@v3
+      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          
       - name: Install dependencies
         run: |
           pip install requests beautifulsoup4
+          
       - name: Run checker
         run: python job_checker.py
+        
       - name: Commit and Push
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add history.json
+          # 差分がない時にエラーで止まらないように設定
           git commit -m "Update job history" || exit 0
           git push
