@@ -3,15 +3,21 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import re # 正規表現モジュールを追加
 
 # 日本時間(JST)の取得
 JST = timezone(timedelta(hours=+9), 'JST')
 now = datetime.now(JST)
 
-# 判定用ワード：月日だけに絞ってヒット率を最大化する
-target_m_d = now.strftime("%m月%d日") # "05月12日"
-target_slash = now.strftime("%m/%d")   # "05/12"
-target_today = "本日"
+# 判定用の数字を用意（5月12日なら、5 と 12）
+m = str(now.month)
+d = str(now.day)
+m_zero = now.strftime("%m")
+d_zero = now.strftime("%d")
+
+# 正規表現パターン：月と日の間に何らかの記号や文字が入っているケースをすべて探す
+# 例: 05/12, 5/12, 05月12日, 5月12日, 05.12 など
+date_pattern = re.compile(f"({m}|{m_zero})[埋年/\. ]+({d}|{d_zero})")
 
 url = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchKeyword_u=&district=kanto&desiredConditionArea=kanto&desiredConditionArea=kanto&searchRegionArea=tokyo-23ward"
 
@@ -38,8 +44,6 @@ def main():
         return
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # 214個取得できているので、そのままのロジックを継続
     items = soup.find_all(["article", "section", "div"], class_=lambda x: x and ("item" in x or "Result" in x))
     
     print(f"--- 読み込みデバッグ情報 ---")
@@ -49,14 +53,13 @@ def main():
     new_arrivals = []
 
     for item in items:
-        # カード内の全テキストを取得
-        text_content = item.get_text(strip=True)
+        text_content = item.get_text(separator=' ', strip=True)
         
-        # 月日が含まれているかチェック
-        if target_m_d in text_content or target_slash in text_content or target_today in text_content:
+        # 正規表現で日付、または「本日」「時間前」が含まれるかチェック
+        if date_pattern.search(text_content) or "本日" in text_content or "時間前" in text_content:
             title_tag = item.find(["h3", "h2", "strong", "p"], class_=lambda x: x and "title" in x)
             if not title_tag:
-                title_tag = item.find(["h3", "h2"]) # 予備
+                title_tag = item.find(["h3", "h2"])
             
             if not title_tag: continue
             
@@ -64,7 +67,6 @@ def main():
             
             # エリア情報の取得
             area = "エリア不明"
-            # addressやmapなどのクラスを持つ要素を探す
             area_tag = item.find(class_=lambda x: x and ("address" in x or "map" in x))
             if area_tag:
                 area = area_tag.get_text(strip=True)
@@ -77,14 +79,14 @@ def main():
 
     # 結果の出力
     if new_arrivals:
-        print(f"\n★新着あり！（{target_m_d} 更新分）★")
+        print(f"\n★新着あり！★ (判定対象: {m}/{d})")
         print("=" * 40)
         for job in new_arrivals:
             print(f"店名: {job['title']}")
             print(f"エリア: {job['area']}")
             print("-" * 40)
     else:
-        print(f"\n{target_m_d} 更新分は見つかりませんでした。")
+        print(f"\n本日（{m}月{d}日）の更新分は見つかりませんでした。")
 
     with open("history.json", "w", encoding="utf-8") as f:
         json.dump(current_today_items, f, ensure_ascii=False, indent=4)
