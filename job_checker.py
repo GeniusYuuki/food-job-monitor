@@ -10,10 +10,7 @@ now = datetime.now(JST)
 m, d = str(now.month), str(now.day)
 m_zero, d_zero = now.strftime("%m"), now.strftime("%d")
 
-# 正規表現パターン
-date_pattern = re.compile(f"({m}|{m_zero})[年/\. ]+({d}|{d_zero})")
-
-# ★URLの末尾に &sort=new を追加して、新着を強制的に上に持ってくる
+# スマホ版URL（パラメータに sort=new を維持）
 url = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchKeyword_u=&district=kanto&desiredConditionArea=kanto&desiredConditionArea=kanto&searchRegionArea=tokyo-23ward&sort=new"
 
 def main():
@@ -27,8 +24,10 @@ def main():
     
     old_titles = {item["title"] for item in old_data if isinstance(item, dict) and "title" in item}
 
+    # ★User-AgentをiPhone(スマホ版)に設定
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
     }
 
     try:
@@ -39,31 +38,32 @@ def main():
         return
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    items = soup.find_all(["article", "section", "div"], class_=lambda x: x and ("item" in x or "Result" in x))
     
-    print(f"--- 読み込みデバッグ情報 ---")
-    print(f"取得したアイテム数: {len(items)}")
+    # スマホ版の求人カード要素を探す（より広く取得）
+    items = soup.find_all(["section", "div", "article"], class_=lambda x: x and ("item" in x.lower() or "list" in x.lower()))
+    
+    print(f"--- スマホ版偽装デバッグ ---")
+    print(f"取得した要素数: {len(items)}")
 
     current_today_items = []
     new_arrivals = []
 
     for item in items:
-        text_content = item.get_text(separator=' ', strip=True)
+        text = item.get_text(separator=' ', strip=True)
         
-        # もし今日が見つからない場合、どんな日付が入っているかデバッグ表示
-        # (ログが爆発しないよう、最初の一件だけ出す)
-        if items.index(item) == 0:
-            found_dates = re.findall(r"\d{1,2}[年/\.]\d{1,2}", text_content)
-            print(f"先頭アイテム内の日付サンプル: {found_dates}")
-
-        if date_pattern.search(text_content) or "本日" in text_content or "時間前" in text_content:
-            title_tag = item.find(["h3", "h2", "strong", "p"], class_=lambda x: x and "title" in x)
-            if not title_tag: title_tag = item.find(["h3", "h2"])
+        # 日付判定（"5/12", "05/12", "5月12日", "本日"）
+        # 正規表現をさらにシンプルに
+        if re.search(rf"({m}|{m_zero})[月/\.\- ]+({d}|{d_zero})", text) or "本日" in text or "時間前" in text:
+            # 店名取得
+            title_tag = item.find(["h1", "h2", "h3", "strong"])
             if not title_tag: continue
-            
             title = title_tag.get_text(strip=True).replace("NEW", "").strip()
-            area_tag = item.find(class_=lambda x: x and ("address" in x or "map" in x))
-            area = area_tag.get_text(strip=True) if area_tag else "エリア不明"
+            
+            # エリア取得
+            area = "不明"
+            # スマホ版は dt/dd 構造が多い
+            area_tag = item.find(["dd", "address", "span"])
+            if area_tag: area = area_tag.get_text(strip=True)[:20]
 
             job_info = {"title": title, "area": area}
             current_today_items.append(job_info)
@@ -72,12 +72,14 @@ def main():
                 new_arrivals.append(job_info)
 
     if new_arrivals:
-        print(f"\n★新着あり！★ (判定対象: {m}/{d})")
-        print("=" * 40)
+        print(f"\n★【スマホ版で発見！】新着あり！（{m}/{d}）★")
         for job in new_arrivals:
             print(f"店名: {job['title']} / エリア: {job['area']}")
-            print("-" * 40)
+            print("-" * 30)
     else:
+        # デバッグ：一件目のテキストを少しだけ出す
+        if items:
+            print(f"サンプルテキスト: {items[0].get_text()[:50]}...")
         print(f"\n本日（{m}月{d}日）の更新分は見つかりませんでした。")
 
     with open("history.json", "w", encoding="utf-8") as f:
