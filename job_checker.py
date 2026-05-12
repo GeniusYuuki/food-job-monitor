@@ -1,74 +1,79 @@
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta, timezone
 import json
 import os
-import time
-import random
-import re
 
-# 飲食店.comのターゲットURL
-TARGET_URL = "https://job.inshokuten.com/kanto/work/?searchJobType=opening&searchArea=tokyo23&sort=new"
-DATA_FILE = "history.json"
+# 日本時間(JST)の取得
+JST = timezone(timedelta(hours=+9), 'JST')
+now = datetime.now(JST)
+today_str = now.strftime("%Y/%m/%d")
+
+url = "https://job.inshokuten.com/kanto/work/search?searchShopCharacteristicId=40&searchKeyword_u=&district=kanto&desiredConditionArea=kanto&desiredConditionArea=kanto&searchRegionArea=tokyo-23ward"
 
 def main():
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    }
+    # 1. 前回のデータを読み込む
+    old_data = []
+    if os.path.exists("history.json"):
+        with open("history.json", "r", encoding="utf-8") as f:
+            try:
+                old_data = json.load(f)
+            except json.JSONDecodeError:
+                old_data = []
     
-    # 履歴の読み込み（保存されている求人IDのリストを読み込む）
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except:
-            history = []
-    else:
-        history = []
+    # 前回の店名リストを作成（差分比較用）
+    old_titles = {item["title"] for item in old_data}
 
-    current_job_ids = []
-    new_jobs = []
+    # 2. サイトから最新情報を取得
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    job_items = soup.select(".p-searchResult__list .p-searchResult__item") 
+    
+    current_today_items = []
+    new_arrivals = []
 
-    try:
-        print("求人ID（末尾数字）で新着をスキャン中...")
-        res = requests.get(TARGET_URL, headers=headers, timeout=30)
+    for item in job_items:
+        date_elem = item.select_one(".u-text--date")
+        if not date_elem: continue
         
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, "html.parser")
-            items = soup.select("article") or soup.select(".itemBox")
+        date_text = date_elem.get_text(strip=True)
+        
+        # 「当日更新」の判定
+        if today_str in date_text or "本日" in date_text or "時間前" in date_text:
+            title = item.select_one(".p-searchResult__title").get_text(strip=True)
+            # エリア情報の取得（飲食店ドットコムの構造に合わせた例）
+            area_elem = item.select_one(".p-searchResult__address")
+            area = area_elem.get_text(strip=True) if area_elem else "エリア不明"
             
-            for item in items:
-                link_tag = item.find("a", href=True)
-                if not link_tag: continue
-                
-                url = "https://job.inshokuten.com" + link_tag['href'].split("?")[0]
-                
-                # URLから末尾の数字（求人ID）を抜き出す
-                match = re.search(r'/(\.d+)$', url) or re.search(r'/(\d+)$', url)
-                if match:
-                    job_id = match.group(1)
-                    current_job_ids.append(job_id)
-                    
-                    # 履歴にこのIDがなければ「新着」！
-                    if job_id not in history:
-                        new_jobs.append(url)
+            link = "https://job.inshokuten.com" + item.select_one("a")["href"]
+            
+            job_info = {
+                "title": title,
+                "area": area,
+                "url": link,
+                "updated_at": date_text
+            }
+            current_today_items.append(job_info)
 
-        print(f"--- 完了：合計{len(current_job_ids)}件を検知 ---")
+            # 前回のリストにいなければ「新着」とする
+            if title not in old_titles:
+                new_arrivals.append(job_info)
 
-        if new_jobs:
-            print(f"★【新着】{len(new_jobs)} 件見つかりました！")
-            for url in new_jobs:
-                print(f"求人：店名不明（ID: {url.split('/')[-1]}）")
-                print(f"URL: {url}")
-                print("-" * 20)
-        else:
-            print("新しい求人はありません。")
+    # 3. 結果の出力
+    if new_arrivals:
+        print("★新着あり！★")
+        print("-" * 30)
+        for job in new_arrivals:
+            print(f"店名: {job['title']}")
+            print(f"エリア: {job['area']}")
+            print(f"URL: {job['url']}")
+            print("-" * 30)
+    else:
+        print("新着はありませんでした。")
 
-    except Exception as e:
-        print(f"エラー発生: {e}")
-
-    # 今回検知したIDリストを保存して、次回の比較に使う
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(current_job_ids, f, ensure_ascii=False, indent=2)
+    # 4. 履歴を更新（当日分のみ保存）
+    with open("history.json", "w", encoding="utf-8") as f:
+        json.dump(current_today_items, f, ensure_ascii=False, indent=4)
 
 if __name__ == "__main__":
     main()
