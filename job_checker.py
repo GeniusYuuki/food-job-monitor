@@ -1,4 +1,4 @@
-import requests
+from curl_cffi import requests # 標準のrequestsから変更し、通信の癖をブラウザに偽装
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import json
@@ -25,13 +25,20 @@ def main():
     
     old_titles = {item["title"] for item in old_data}
 
+    # 変更点: ヘッダーを実際のブラウザ（Chrome）とほぼ同一に設定
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Referer": "https://job.inshokuten.com/",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1"
     }
 
     try:
-        response = requests.get(target_url, headers=headers, timeout=20)
-        response.encoding = response.apparent_encoding
+        # 変更点: impersonate="chrome110" を指定し、Chromeブラウザの通信としてアクセス
+        response = requests.get(target_url, headers=headers, impersonate="chrome110", timeout=20)
+        response.encoding = 'utf-8'
         response.raise_for_status()
     except Exception as e:
         print(f"アクセスエラー: {e}")
